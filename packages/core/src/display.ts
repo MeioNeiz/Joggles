@@ -12,6 +12,9 @@ export const ROWS = 9
 export const COLS = 24
 export const STRIDE = 2
 
+/** Two-bit pixel value meaning "lit", matching the vendor's own frame data. */
+export const PIXEL_ON = 0b11
+
 /**
  * The panel is not a rectangle. Two centred physical gaps, mapped by drawing a
  * full border and noting what was missing: the middle of the top row, and a
@@ -93,11 +96,18 @@ export class Grid {
     return g
   }
 
-  /** The 24-bit word for one column, in the panel's bit layout. */
+  /**
+   * The 24-bit word for one column, in the panel's bit layout.
+   *
+   * Each pixel owns two bits. The vendor's own animation data (AnimData.java)
+   * only ever uses 0b00 or 0b11, never a single bit, so we write 0b11 to match.
+   * Writing only the even bit lights the LED too, but is not something the
+   * firmware ever does itself.
+   */
   columnWord(c: number): number {
     let bits = 0
     for (let r = 0; r < ROWS; r++) {
-      if (this.px[r][c]) bits |= 1 << (STRIDE * r)
+      if (this.px[r][c]) bits |= PIXEL_ON << (STRIDE * r)
     }
     return bits
   }

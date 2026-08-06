@@ -2,12 +2,19 @@ import { expect, test } from 'bun:test'
 import { COLS, Grid, ROWS, alive, edgePixels } from './display.js'
 import { textBitmap, textWidth } from './font.js'
 
-test('bit stride 2: row r lands on bit 2r', () => {
+test('pixels use the vendor two-bit value 0b11 at stride 2', () => {
   const g = new Grid()
   g.set(0, 0)
-  expect(g.columnWord(0)).toBe(0b1)
+  expect(g.columnWord(0)).toBe(0b11)
   g.clear().set(8, 0)
-  expect(g.columnWord(0)).toBe(1 << 16)
+  expect(g.columnWord(0)).toBe(0b11 << 16)
+})
+
+test('a full column matches a real vendor animation word', () => {
+  // AnimData.getAnim1() frame 1 contains 262128 = 0x3FFF0 = bits 4..17 = rows 2..8.
+  const g = new Grid()
+  for (let r = 2; r <= 8; r++) g.set(r, 0)
+  expect(g.columnWord(0)).toBe(262128)
 })
 
 test('dead zones match the physical panel', () => {
