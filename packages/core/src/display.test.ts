@@ -53,3 +53,23 @@ test('grid dimensions', () => {
   expect(ROWS).toBe(9)
   expect(COLS).toBe(24)
 })
+
+test('four brightness levels round-trip through the column word', () => {
+  const g = new Grid()
+  g.set(0, 0, 1).set(1, 0, 2).set(2, 0, 3)
+  expect(g.columnWord(0)).toBe(0b11_10_01)
+})
+
+test('set(true) is full brightness, set(false) is off', () => {
+  const g = new Grid()
+  g.set(0, 0, true)
+  expect(g.columnWord(0)).toBe(0b11)
+  g.set(0, 0, false)
+  expect(g.columnWord(0)).toBe(0)
+})
+
+test('levels clamp into range', () => {
+  const g = new Grid()
+  g.set(0, 0, 99)
+  expect(g.columnWord(0)).toBe(0b11)
+})

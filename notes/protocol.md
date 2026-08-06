@@ -131,7 +131,17 @@ empirically instead.
 The two-bits-per-pixel stride is the non-obvious part. Lighting bit `n` lands on
 row `n // 2`, verified at bits 0, 11, 13, 15 and 16, and confirmed by drawing
 the same box at stride 1 and stride 2: stride 2 fills the lens, stride 1 draws a
-box in the bottom half only. What the odd bit does (brightness?) is untested.
+box in the bottom half only.
+
+**The odd bit is brightness.** Confirmed on hardware: alternating a filled
+region between `0b01` and `0b11` visibly changes brightness. So the panel is
+**4-level greyscale**, not monochrome - pixel values 0-3. `display.Grid.set()`
+takes a level, and `PIXEL_OFF/DIM/MID/ON` name the values.
+
+The vendor's own frame data only ever uses `0b00` or `0b11`, so greyscale is
+capability their app never exercises. Independent confirmation of the whole
+encoding: our `Grid` reproduces `AnimData.getAnim1()` frame 1's column word
+`262128` (= rows 2-8 at full level) exactly.
 
 The vendor's own `parseType()` knows only 5x36, 12x48, 14x56 and 16x64, none of
 which match. This model is simply outside the table, which is consistent with it

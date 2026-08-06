@@ -12,8 +12,18 @@ export const ROWS = 9
 export const COLS = 24
 export const STRIDE = 2
 
-/** Two-bit pixel value meaning "lit", matching the vendor's own frame data. */
+/**
+ * Each pixel is TWO bits, and the odd bit is brightness - confirmed on hardware
+ * by comparing 0b01 against 0b11. So the panel is 4-level greyscale, not
+ * monochrome. The vendor's own frame data only ever uses OFF or MAX.
+ */
+export const PIXEL_OFF = 0b00
+export const PIXEL_DIM = 0b01
+export const PIXEL_MID = 0b10
 export const PIXEL_ON = 0b11
+
+/** Highest pixel level, for callers scaling into the range. */
+export const MAX_LEVEL = 3
 
 /**
  * The panel is not a rectangle. Two centred physical gaps, mapped by drawing a
@@ -60,9 +70,11 @@ export class Grid {
     return this
   }
 
-  set(row: number, col: number, on = true): this {
+  /** Set a pixel. `level` is 0-3; `true` means full brightness. */
+  set(row: number, col: number, level: boolean | number = PIXEL_ON): this {
     if (row >= 0 && row < ROWS && col >= 0 && col < COLS) {
-      this.px[row][col] = on ? 1 : 0
+      const v = level === true ? PIXEL_ON : level === false ? 0 : level
+      this.px[row][col] = Math.max(0, Math.min(MAX_LEVEL, Math.round(v)))
     }
     return this
   }
@@ -107,7 +119,7 @@ export class Grid {
   columnWord(c: number): number {
     let bits = 0
     for (let r = 0; r < ROWS; r++) {
-      if (this.px[r][c]) bits |= PIXEL_ON << (STRIDE * r)
+      bits |= (this.px[r][c] & PIXEL_ON) << (STRIDE * r)
     }
     return bits
   }
@@ -143,9 +155,10 @@ export class Grid {
 
   /** ASCII preview, top row first, so terminal output matches the lens. */
   render(): string {
+    const shade = ['.', '-', '+', '#'] // one glyph per brightness level
     const lines: string[] = []
     for (let r = ROWS - 1; r >= 0; r--) {
-      lines.push([...this.px[r]].map((v) => (v ? '#' : '.')).join(''))
+      lines.push([...this.px[r]].map((v) => shade[v] ?? '#').join(''))
     }
     return lines.join('\n')
   }
