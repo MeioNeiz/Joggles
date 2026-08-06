@@ -94,19 +94,47 @@ fastjson2 constant names; resolved values are `D`=68, `G`=71, `H`=72, `M`=77,
 | `STSC` | `04 STSC` | read timer setting |
 | `CALL st t` | `06 CALL ...` | incoming-call display |
 
-## Panel geometry
+## Panel geometry - confirmed on hardware
 
-The device reports its own size. `STYPE` returns an ASCII reply parsed by
-`Agreement.parseType()`:
+Our unit (`GLASSES-12C3EF`) does **not** answer `STYPE`, on either
+write-without-response or write-with-response, so geometry was derived
+empirically instead.
 
-| Reply | Panel |
+| Property | Value |
 | --- | --- |
-| `STYPE5X36` | 5 x 36 |
-| `STYPE12X48` | 12 x 48 |
-| `STYPE14X56` | 14 x 56 |
-| `STYPE16X64` | 16 x 64 |
+| Grid | 9 rows x 24 columns |
+| Origin | row 0 = bottom, column 0 = left |
+| Row packing | row `r` -> bit `2*r` of the 3-byte column word |
+| Bits per pixel | 2 (only the even bit is needed to light a pixel) |
 
-Query this first rather than assuming - our unit's size is still unconfirmed.
+The two-bits-per-pixel stride is the non-obvious part. Lighting bit `n` lands on
+row `n // 2`, verified at bits 0, 11, 13, 15 and 16, and confirmed by drawing
+the same box at stride 1 and stride 2: stride 2 fills the lens, stride 1 draws a
+box in the bottom half only. What the odd bit does (brightness?) is untested.
+
+The vendor's own `parseType()` knows only 5x36, 12x48, 14x56 and 16x64, none of
+which match. This model is simply outside the table, which is consistent with it
+not answering `STYPE` at all.
+
+### The panel is not a rectangle
+
+Two physical gaps, mapped by drawing a full border and noting what was missing:
+
+    #########......#########   top row: middle 6 pixels absent
+    #........######........#
+    #......................#
+    #......................#
+    #......................#
+    #......................#
+    #.........####.........#
+    #........#....#........#   nose-bridge notch, 2 rows tall,
+    #########......#########   6 wide at the bottom
+
+`display.alive(row, col)` encodes this; `display.edge_pixels()` traces the true
+silhouette. Confirmed correct against the hardware.
+
+Practical consequence: **rows 2-7 are the only band alive across all 24
+columns**, so text lives there. That is a 6-row band, hence the 5-row font.
 
 ## Bulk pixel format
 
