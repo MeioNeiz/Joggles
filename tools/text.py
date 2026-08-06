@@ -2,26 +2,23 @@
 """Put your own text on the glasses.
 
 Usage:
-    python tools/text.py "HELLO"              # static if it fits, else scrolls
-    python tools/text.py "LONG MESSAGE" 0.08  # custom scroll delay
-    python tools/text.py --preview "HELLO"    # terminal only, no hardware
+    python tools/text.py "HELLO"                # static if it fits, else scrolls
+    python tools/text.py --clear                # blank the panel
+    python tools/text.py --static "F"           # hold one frame, no scrolling
+    python tools/text.py --mirror "HELLO"       # flip horizontally
+    python tools/text.py --preview "HELLO"      # terminal only, no hardware
 """
 import asyncio
 import sys
 
 sys.path.insert(0, __file__.rsplit("/tools/", 1)[0])
 
-from bleak import BleakClient, BleakScanner  # noqa: E402
-
 from joggles import display as d  # noqa: E402
 from joggles import font  # noqa: E402
-from joggles import protocol as p  # noqa: E402
-
-DEFAULT_NAME = "GLASSES-12C3EF"
-BULK = p.CHAR_BULK_B
+from joggles.client import Glasses  # noqa: E402
 
 
-def frame_for(bitmap: list[list[int]], offset: int) -> d.Grid:
+def frame_for(bitmap: list[list[int]], offset: int, mirror: bool = False) -> d.Grid:
     """Window `bitmap` at horizontal `offset` into a 9x24 grid."""
     g = d.Grid()
     w = len(bitmap[0]) if bitmap else 0
@@ -29,64 +26,62 @@ def frame_for(bitmap: list[list[int]], offset: int) -> d.Grid:
         for c in range(d.COLS):
             src = c + offset
             if 0 <= src < w and bitmap[r][src]:
-                g.set(font.BASELINE + r, c)
+                g.set(font.BASELINE + r, (d.COLS - 1 - c) if mirror else c)
     return g
 
 
-async def cmd(client: BleakClient, plaintext: bytes) -> None:
-    await client.write_gatt_char(p.CHAR_COMMAND, p.encrypt(plaintext), response=False)
-    await asyncio.sleep(0.2)
-
-
-async def push(client: BleakClient, grid: d.Grid) -> None:
-    for block in grid.to_frames():
-        await client.write_gatt_char(BULK, p.encrypt(block), response=False)
-
-
 async def main() -> None:
-    args = [a for a in sys.argv[1:] if a != "--preview"]
-    preview_only = "--preview" in sys.argv
+    argv = sys.argv[1:]
+    flags = {a for a in argv if a.startswith("--")}
+    args = [a for a in argv if not a.startswith("--")]
+
+    if "--clear" in flags:
+        async with await Glasses.open() as g:
+            print("Clearing (repeated, to beat any dropped writes)...")
+            await g.begin()
+            for _ in range(3):
+                await g.show(d.Grid())
+                await asyncio.sleep(0.3)
+            await g.end(mode="keep")
+        print("Cleared (stayed in DIY, so the saved image cannot come back).")
+        return
+
     text = args[0] if args else "HELLO"
-    delay = float(args[1]) if len(args) > 1 else 0.09
+    delay = float(args[1]) if len(args) > 1 else 0.12
+    mirror = "--mirror" in flags
 
     bitmap = font.text_bitmap(text)
     w = font.text_width(text)
+    fits = w <= d.COLS or "--static" in flags
     print(f"{text!r} -> {w} columns wide, panel is {d.COLS}\n")
 
-    if w <= d.COLS:
-        centred = frame_for(bitmap, -((d.COLS - w) // 2))
-        print(centred.render())
-    else:
-        print(frame_for(bitmap, 0).render())
-        print("\n(scrolls, too wide to fit)")
+    centred = frame_for(bitmap, -((d.COLS - w) // 2), mirror)
+    print(centred.render())
 
-    if preview_only:
+    if "--preview" in flags:
         return
 
-    dev = await BleakScanner.find_device_by_name(
-        args[2] if len(args) > 2 else DEFAULT_NAME, timeout=20.0
-    )
-    if dev is None:
-        sys.exit("Glasses not found")
+    async with await Glasses.open() as g:
+        print(f"\nConnected, {g._blocks_per_write} blocks per write")
+        await g.begin()
 
-    async with BleakClient(dev.address, timeout=30.0) as client:
-        print(f"\nConnected to {dev.name}")
-        await cmd(client, p.enter_diy())
-        await cmd(client, p.leds(True))
-
-        if w <= d.COLS:
-            await push(client, frame_for(bitmap, -((d.COLS - w) // 2)))
+        if fits:
+            for _ in range(3):  # resend: cheap insurance against a dropped write
+                await g.show(centred)
+                await asyncio.sleep(0.2)
+            print("Holding 25s...")
             await asyncio.sleep(25.0)
         else:
-            print("Scrolling 3 times, Ctrl-C to stop early...")
+            print("Scrolling 3 times...")
+            frames = [
+                frame_for(bitmap, off, mirror)
+                for off in range(-d.COLS, w + 1)
+            ]
             for _ in range(3):
-                for off in range(-d.COLS, w + 1):
-                    await push(client, frame_for(bitmap, off))
-                    await asyncio.sleep(delay)
+                await g.animate(frames, delay=delay)
 
-        await push(client, d.Grid())
-        await cmd(client, p.exit_diy(save=False))
-        print("Done.")
+        await g.end(mode="keep")
+        print("Done. Frame left on screen; run tools/off.py to blank.")
 
 
 if __name__ == "__main__":
