@@ -47,9 +47,6 @@ wrong and 23 is what you want.
 
 - ONE 16-byte block per ATT write. Panel decodes first only, drops rest silently
 - Write-without-response has no flow control. Pace writes or columns go stale
-- Flush before disconnecting. Queued writes are discarded on teardown, and the
-  last column of a frame is the usual casualty - it reads as "the right column of
-  the panel is dead". `Glasses.end()` now flushes with an acked write
 - Pacing-bound not hardware-bound. Safe floor unknown. Streamed full frames always
   sweep visibly (24 x pacing to fill, 58ms even at 2ms); use DATS for clean motion
 - `SMVEW 00` restores the saved image, looks like stray pixels. Default `end('keep')`
@@ -77,8 +74,10 @@ hardware and used by `getAnim19`.
 
 ## Don't
 
-- Flash firmware. Container solved (XOR pad, CRC32 over plaintext, no signature,
-  app base `0x16800`) but the bootloader is undumped and the OTA service lives in
-  the app image, so a bad flash may be permanent. Dump 256 KB over SWD first.
-  Detail: `research/firmware-image-format.md`
+- Relink firmware, exceed 66 KB, or send OTA `type 2`. Flashing a *patched stock*
+  app image over BLE is safe: the OTA stages at `0x29400` and never erases the
+  running app, so an aborted transfer costs nothing and we can re-flash stock
+  ourselves. What is not safe is shipping an image that fails to bring up BLE (the
+  OTA service lives in the app), and images over ~84 KB, which erase the bootloader.
+  Read `research/firmware-flashing.md` before writing any flash
 - Commit vendor binaries: `apk/`, `decompiled/`, `native/`, `firmware/`
