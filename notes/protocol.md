@@ -133,10 +133,20 @@ row `n // 2`, verified at bits 0, 11, 13, 15 and 16, and confirmed by drawing
 the same box at stride 1 and stride 2: stride 2 fills the lens, stride 1 draws a
 box in the bottom half only.
 
-**The odd bit is brightness.** Confirmed on hardware: alternating a filled
-region between `0b01` and `0b11` visibly changes brightness. So the panel is
-**4-level greyscale**, not monochrome - pixel values 0-3. `display.Grid.set()`
-takes a level, and `PIXEL_OFF/DIM/MID/ON` name the values.
+**The odd bit is brightness.** The panel is **4-level greyscale**, not
+monochrome - pixel values 0-3. `display.Grid.set()` takes a level, and
+`PIXEL_OFF/DIM/MID/ON` name the values.
+
+Confirmed twice: alternating a filled region between `0b01` and `0b11` changes
+brightness, and three eight-column bands at levels 1/2/3 read as three
+increasing steps left to right.
+
+**The steps are subtle.** A first attempt using six-column bands with one band
+at level 0 read as "left quarter off, one block of brightness for the rest" -
+the lit levels were not separable at that size. Wider bands with dark separator
+columns made them distinguishable. Design for this: greyscale is good for
+anti-aliasing and gradients, not for encoding information the wearer must read
+at a glance.
 
 The vendor's own frame data only ever uses `0b00` or `0b11`, so greyscale is
 capability their app never exercises. Independent confirmation of the whole
