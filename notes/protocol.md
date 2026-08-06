@@ -390,6 +390,58 @@ The HCI capture only rediscovered what was already in the decompiled source.
 When something looks undocumented, list the directory before inferring from
 traffic.
 
+
+## App-side preview data in model/data/
+
+*derived*, decoded from the vendor APK.
+
+These arrays are **not** the device's content banks. Per
+`research/vendor-app-protocol.md`, `AnimData`/`ImageData` are app-side preview
+thumbnails rendered locally and never uploaded; the real banks are
+firmware-resident. Their value here is different: the previews are drawn in the
+device's exact encoding, so they independently confirm our geometry.
+
+### AnimData.java - preview frames
+
+13 animations, sparsely numbered `getAnim1`..`getAnim19`, 295 frames total, between
+2 and 58 frames each. Each frame is `int[24]` - one 24-bit column word per display
+column, in exactly the DIY encoding.
+
+This is strong independent confirmation of our geometry, from data we did not
+derive: **every frame is 24 columns**, and the highest bit used across all 295 is
+17, giving rows 0-8. Panel is 9 x 24, as measured.
+
+Pixel levels across the whole bank: 62753 off, 17851 full, and 288 each of levels
+1 and 2. The intermediate values are confined to `getAnim19`, whose column words
+are `0x3AAAB` - an alternating pattern giving level `0b10` on most rows, i.e. a
+deliberately dimmed effect. So the firmware supports greyscale and the vendor uses
+it, just rarely.
+
+`ImageData.java` holds 11 static previews, matching the app store's "11 preset
+patterns". Again previews, not the uploaded bank.
+
+Caveat: jadx rewrote some integer literals as same-valued library constants
+(`HttpStatus.SC_*`, `Opcodes.*`, `PointerIconCompat.*`). 315 were skipped when
+decoding, so counts are lower bounds. Resolve them before treating the bank as
+complete.
+
+### Text1456.java - the vendor font
+
+`getStringBytes()` concatenates a per-character byte array (`get_A()`, `get_0()`,
+...), falling back to rasterising the character via Android `Canvas` when it is not
+in the table. That fallback is how it handles CJK.
+
+37 glyphs extracted, variable width 2-7 columns, most 5. Encoding is the DATS
+format: 16-bit little-endian per column.
+
+**The vendor font only uses bits 0-6.** The union of every bit set across all
+glyphs is `0b1111111`, so rows 7-13 of the DATS format are never touched by their
+text renderer. Their text is 7 rows tall on a 9-row panel.
+
+This does not prove rows 7-8 are unreachable through DATS - only that the vendor
+never uses them. *unverified*, and worth one hardware test, because it decides
+whether uploaded graphics can use the full panel height or only 7 of 9 rows.
+
 ## Open questions
 
 Answered since the last pass:

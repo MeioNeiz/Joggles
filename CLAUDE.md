@@ -6,6 +6,9 @@ Docs: `notes/protocol.md` for key, frames, geometry, command table.
 `research/README.md` indexes the firmware/OTA teardown, the saved-content
 subsystem and the full opcode inventory. Read `research/` before touching firmware.
 
+**Adding to the docs: follow `notes/WRITING.md`.** It sets the confidence markers,
+the lean-file rule, and why corrections are recorded rather than deleted.
+
 - Bun + TS only. No Python, no Go
 - `packages/core` pure TS, zero deps. `packages/cli` noble/CoreBluetooth
 - `bun test` | `bun cli <text|edge|off|bench|stress>`
@@ -31,10 +34,10 @@ wrong and 23 is what you want.
 
 ## Code state
 
-- Send-side `DATS`/`DATCP` is **not implemented**, and `glasses.ts` never
-  subscribes to `CHAR_NOTIFY`, so replies cannot be seen yet. Both are needed to
-  save. Receive side exists: `dats.ts` and `decode-{dats,snoop}.ts` reassemble the
-  vendor app's upload out of an HCI capture in `captures/`
+- Send-side `DATS`/`DATCP` **is implemented** and verified: `Glasses.upload()`
+  does the full handshake and the device returns `DATCPOK`. `glasses.ts` now
+  subscribes to `CHAR_NOTIFY`. Our own bitmap has been uploaded and left scrolling
+  unattended. Receive side also exists: `dats.ts`, `decode-{dats,snoop}.ts`
 - `protocol.ts` `scrollLeft`/`scrollRight` are **misnamed**. The live form is
   `MODE <kind> <dir>`: kind 1 static, 2 horizontal, 3 vertical, dir 0 or 1. The
   argument is not speed (`SPEED n` is separate) and `MODE 04` is dead in the app
@@ -44,7 +47,8 @@ wrong and 23 is what you want.
 
 - ONE 16-byte block per ATT write. Panel decodes first only, drops rest silently
 - Write-without-response has no flow control. Pace writes or columns go stale
-- Pacing-bound not hardware-bound. Safe floor unknown
+- Pacing-bound not hardware-bound. Safe floor unknown. Streamed full frames always
+  sweep visibly (24 x pacing to fill, 58ms even at 2ms); use DATS for clean motion
 - `SMVEW 00` restores the saved image, looks like stray pixels. Default `end('keep')`
 - `MODE` while in DIY switches to saved content, discards the live buffer
 - BLE = one connection. Close phone app first
@@ -62,7 +66,11 @@ in a 7+7 split (bits 0-6, then 8-14; bit 7 unused), of which our panel lights 9.
 ## Unverified
 
 `MODE` 2nd byte (direction in app, but n=0..7 differ on hardware), `DATS` type 2
-over 72 bytes, `LEDFIRST`/`LEDSECOND`, odd bit, `COLR`/`LEVL`/`POWR`, `STYPE`.
+over 72 bytes, `LEDFIRST`/`LEDSECOND`, `COLR`/`LEVL`/`POWR`, `STYPE`, and whether
+DATS rows 7-8 reach the panel (vendor font uses only rows 0-6).
+
+Settled since: the odd bit is **brightness** - 4-level greyscale, confirmed on
+hardware and used by `getAnim19`.
 
 ## Don't
 

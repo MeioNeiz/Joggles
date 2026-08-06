@@ -14,6 +14,9 @@ geometry, command table). These documents extend and in places correct it.
 
 ## Conventions used throughout
 
+Writing style for these documents is set by `notes/WRITING.md`. The confidence
+markers below are the canonical set; do not introduce others.
+
 - **Offsets** are stated as `body 0xNNNN` (an offset into the *deobfuscated* OTA
   payload, i.e. after the 16-byte container header) or `abs 0xNNNN` (an address in
   the device's flash). The relationship is fixed: `abs = body + 0x16800`.
