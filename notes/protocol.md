@@ -20,16 +20,25 @@ the AD structure of type `0xFF` - see `ble/BleConfig.java`.
 
 ## GATT
 
-From `com/cdbwsoft/library/AppConfig.java`.
-
 | UUID | Role |
 | --- | --- |
-| `0000fee9-0000-1000-8000-00805f9b34fb` | service |
+| `0000fff0-0000-1000-8000-00805f9b34fb` | service |
 | `d44bc439-abfd-45a2-b575-925416129600` | command write |
 | `d44bc439-abfd-45a2-b575-925416129601` | notify (device replies) |
 | `d44bc439-abfd-45a2-b575-92541612960a` | bulk pixel upload |
 | `d44bc439-abfd-45a2-b575-92541612960b` | bulk pixel upload |
 | `00002902-0000-1000-8000-00805f9b34fb` | CCCD, to enable notifications |
+
+**The service is `fff0`, not `fee9`.** `BleManager.UUID_SERVICE_TEXT` is `fff0` and
+that is what `onServicesDiscovered` matches on; the `fee9` in `AppConfig.java` is a
+stale default. The firmware declares both, twelve bytes apart in the same table, and
+our `protocol.ts` uses `fff0` and connects. For what it is worth, `fee9` plus the
+`d44bc439` characteristics are the Quintic QPP profile, copy-pasted across unrelated
+silicon, so they imply nothing about the SoC.
+
+Firmware OTA lives on a separate service: `fd00`, with `fd01` data and `fd02`
+control. Those writes are **not** AES-encrypted. See
+`research/firmware-image-format.md`.
 
 ## Encryption
 

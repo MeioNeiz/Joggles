@@ -9,7 +9,7 @@
  *     the controller drops them, leaving stale columns lit.
  */
 import noble from '@abandonware/noble'
-import { Grid, display, protocol as p } from '@joggles/core'
+import { Grid, dats, display, protocol as p } from '@joggles/core'
 
 /** noble strips dashes from UUIDs. */
 const flat = (uuid: string) => uuid.replace(/-/g, '')
@@ -25,10 +25,14 @@ export interface Options {
 export class Glasses {
   private last: Grid | null = null
 
+  private waiters: Array<(reply: string) => void> = []
+
   private constructor(
     private peripheral: any,
     private cmdChar: any,
     private bulkChar: any,
+    private datsChar: any,
+    private notifyChar: any,
     private pacing: number,
   ) {}
 
@@ -38,16 +42,69 @@ export class Glasses {
     await peripheral.connectAsync()
     const { characteristics } = await peripheral.discoverSomeServicesAndCharacteristicsAsync(
       [],
-      [flat(p.CHAR_COMMAND), flat(p.CHAR_BULK_B)],
+      [flat(p.CHAR_COMMAND), flat(p.CHAR_BULK_A), flat(p.CHAR_BULK_B), flat(p.CHAR_NOTIFY)],
     )
-    const cmd = characteristics.find((c: any) => c.uuid === flat(p.CHAR_COMMAND))
-    const bulk = characteristics.find((c: any) => c.uuid === flat(p.CHAR_BULK_B))
+    const find = (u: string) => characteristics.find((c: any) => c.uuid === flat(u))
+    const cmd = find(p.CHAR_COMMAND)
+    const bulk = find(p.CHAR_BULK_B)
+    // The vendor app uploads DATS payloads to 960a, not 960b.
+    const datsCh = find(p.CHAR_BULK_A)
+    const notify = find(p.CHAR_NOTIFY)
     if (!cmd || !bulk) throw new Error('expected characteristics not found')
-    return new Glasses(peripheral, cmd, bulk, pacing)
+    const g = new Glasses(peripheral, cmd, bulk, datsCh, notify, pacing)
+    await g.listen()
+    return g
   }
 
   get name(): string {
     return this.peripheral.advertisement.localName
+  }
+
+  /** Subscribe to the notify channel; DATS is handshake-driven. */
+  private async listen(): Promise<void> {
+    if (!this.notifyChar) return
+    this.notifyChar.on('data', (buf: Buffer) => {
+      if (buf.length !== p.BLOCK_SIZE) return
+      const reply = dats.parseReply(p.decrypt(new Uint8Array(buf)))
+      if (!reply) return
+      for (const w of this.waiters.splice(0)) w(reply)
+    })
+    await this.notifyChar.subscribeAsync()
+  }
+
+  private waitReply(timeoutMs = 5000): Promise<string> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve('TIMEOUT'), timeoutMs)
+      this.waiters.push((r) => {
+        clearTimeout(timer)
+        resolve(r)
+      })
+    })
+  }
+
+  /**
+   * Upload a bitmap for the device to store and animate by itself.
+   *
+   * Unlike show(), this survives disconnection: the MODE commands display
+   * DATS content, not the live DIY buffer.
+   */
+  async upload(bitmap: number[][]): Promise<string> {
+    if (!this.datsChar) throw new Error('960a not available')
+    const payload = dats.encodeBitmap(bitmap)
+
+    const ack = this.waitReply()
+    await this.cmdChar.writeAsync(Buffer.from(p.encrypt(dats.datsStart(payload.length))), true)
+    const started = await ack
+    if (started !== 'DATSOK') return `DATS not acknowledged: ${started}`
+
+    for (const block of dats.chunkPayload(payload)) {
+      await this.datsChar.writeAsync(Buffer.from(p.encrypt(block)), true)
+      await sleep(50) // the vendor app sleeps 50ms between chunks
+    }
+
+    const done = this.waitReply()
+    await this.cmdChar.writeAsync(Buffer.from(p.encrypt(dats.datsComplete())), true)
+    return await done
   }
 
   async command(frame: Uint8Array): Promise<void> {
