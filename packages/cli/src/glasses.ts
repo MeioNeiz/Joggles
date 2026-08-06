@@ -146,13 +146,34 @@ export class Glasses {
    * "keep" is the default.
    */
   async end(mode: 'keep' | 'off' | 'restore' = 'keep'): Promise<void> {
+    // Writes are fire-and-forget, so anything still queued is discarded when the
+    // connection drops. The last column of a full frame is the usual casualty:
+    // it looks like the rightmost column of the panel is dead. Let the stack
+    // drain before tearing down.
+    await this.flush()
     if (mode === 'off') {
       await this.show(new Grid(), true)
       await this.command(p.leds(false))
     } else if (mode === 'restore') {
       await this.command(p.exitDIY())
     }
+    await this.flush()
     await this.peripheral.disconnectAsync()
+  }
+
+  /**
+   * Wait for queued write-without-response packets to actually go out.
+   *
+   * A write WITH response is acknowledged by the peer, so once it returns every
+   * earlier write has necessarily been transmitted. Cheaper and more reliable
+   * than guessing at a sleep.
+   */
+  async flush(): Promise<void> {
+    try {
+      await this.cmdChar.writeAsync(Buffer.from(p.encrypt(p.frame('STYPE'))), false)
+    } catch {
+      await sleep(200) // fall back to a delay if the acked write is refused
+    }
   }
 }
 

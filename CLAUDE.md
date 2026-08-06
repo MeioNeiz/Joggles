@@ -47,6 +47,9 @@ wrong and 23 is what you want.
 
 - ONE 16-byte block per ATT write. Panel decodes first only, drops rest silently
 - Write-without-response has no flow control. Pace writes or columns go stale
+- Flush before disconnecting. Queued writes are discarded on teardown, and the
+  last column of a frame is the usual casualty - it reads as "the right column of
+  the panel is dead". `Glasses.end()` now flushes with an acked write
 - Pacing-bound not hardware-bound. Safe floor unknown. Streamed full frames always
   sweep visibly (24 x pacing to fill, 58ms even at 2ms); use DATS for clean motion
 - `SMVEW 00` restores the saved image, looks like stray pixels. Default `end('keep')`

@@ -5,7 +5,9 @@ self-contained: read only the one that matches your task.
 
 | Document | Covers | Read it when |
 | --- | --- | --- |
-| `firmware-image-format.md` | OTA container format, firmware internals, SoC identity, flash map, flashing risk and recovery | Touching firmware, OTA, or anything that writes flash |
+| `firmware-flashing.md` | **Is it safe to flash?** OTA state machine, corrected flash map, size envelope, safe procedure | Before writing a single byte of flash |
+| `hardware-access.md` | SWD pads, chip package, probes, dump and restore procedure | Only if OTA is not enough, or as insurance |
+| `firmware-image-format.md` | OTA container format, firmware internals, SoC identity | Inspecting or rebuilding an image. **Its flash map and risk verdict are superseded by `firmware-flashing.md`** |
 | `vendor-app-protocol.md` | Saved content (`DATS`/`DATCP`), wide buffers, complete opcode inventory, hard limits | Improving rendering or driving the display |
 | `ota-codec.ts` | Runnable decode/encode/verify for OTA images | Inspecting or rebuilding a firmware image |
 
@@ -30,11 +32,15 @@ markers below are the canonical set; do not introduce others.
 
 ## Current state in one paragraph
 
-The display protocol is solved and verified on hardware. The OTA container format
-is also solved: the payload is XOR-obfuscated with a fixed 128-byte pad, not
-encrypted with a key we lack, and the header CRC-32 covers the deobfuscated body,
-so valid modified images can be built. Flashing is nonetheless **not** safe yet,
-because the ~90 KB bootloader region below `abs 0x16800` has never been dumped and
-no recovery path has been confirmed on this unit. Better rendering does not require
-firmware changes: the device already stores and scrolls buffers far wider than the
-panel.
+The display protocol is solved and verified on hardware. The OTA container format is
+also solved: the payload is XOR-obfuscated with a fixed 128-byte pad, not encrypted
+with a key we lack, and the header CRC-32 covers the deobfuscated body, so valid
+modified images can be built. **Flashing an app image over BLE is now judged
+reasonably safe**, because the OTA has been disassembled and is staged: it writes to
+a separate bank at `abs 0x29400` and never erases the running application, so an
+aborted transfer costs nothing and we can re-flash stock ourselves at any time. The
+earlier "not safe yet" verdict rested on two mistakes, both corrected in
+`firmware-flashing.md`: the region below `abs 0x16800` is the BLE stack rather than
+the bootloader, and the staging bank does exist. Better rendering still requires no
+firmware changes at all: the device already stores and scrolls buffers far wider than
+the panel.
