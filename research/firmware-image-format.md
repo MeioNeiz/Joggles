@@ -19,26 +19,30 @@ address. `abs = body + 0x16800`.
 | Signature check | none, anywhere in the flash path | verified |
 | Load base | body `0` maps to `abs 0x16800` | verified |
 | SoC | Panchip PAN1020 class, ARM Cortex-M0, 256 KB flash, <=16 KB SRAM | high, die marking unverified |
-| Bootloader region | `abs 0x0` to `0x167ff`, ~90 KB, never transmitted, absent from every stock file | derived |
+| Region below `abs 0x16800` | the **BLE stack**, ~90 KB. *Was wrongly recorded here as the bootloader* | verified |
 | Saved user content | `abs 0x3c000`, a `0x600`-byte (1.5 KB) buffer | derived |
 | OTA service host | the application image, not a separate bootloader advertiser | verified |
-| Safe to flash today | **no**, see "Flashing risk and recovery" | judgement |
+| Safe to flash today | **yes for a patched stock app image**, see `firmware-flashing.md` | judgement |
 
-## Verdict on flashing
+## Verdict on flashing: superseded
 
-Custom firmware is **technically feasible**: the container is fully understood, a
-modified image can be given a valid CRC, and nothing checks a signature. The
-blocker is recovery, not authoring.
+**This section was wrong and is kept only to record the error.** Read
+`research/firmware-flashing.md` instead; it disassembles the OTA handler and settles
+the question.
 
-Do not flash yet. The ~90 KB below `abs 0x16800` holds the bootloader, has never
-been dumped, and exists in no stock file, so there is nothing to restore it from.
-The OTA service is implemented by the application image itself, so a bad
-application image plausibly removes the only route back over the air. Recovery via
-SWD is likely available but unconfirmed on this unit.
+What was claimed here: that flashing must wait on a full SWD dump, because the ~90 KB
+below `abs 0x16800` was the bootloader, existed in no stock file, and there was no
+evidence of a staging bank.
 
-The prerequisite for any flashing work is a **full 256 KB SWD dump**. That single
-artefact answers the staging-bank question, yields the bootloader, and is itself
-the recovery image.
+What is actually true. That region is the **BLE stack**, not the bootloader; the
+bootloader is 8 KB at `abs 0x3dc00` and an app OTA never touches it. The stack is
+published in Panchip's own SDK. And the staging bank does exist, at `abs 0x29400`:
+the OTA writes there and never erases the running application, so an aborted transfer
+costs nothing. The literal scan that produced "no literal points at a staging base"
+missed it because the base is loaded at runtime from a const table at `abs 0x26930`
+rather than appearing as an immediate.
+
+The lesson worth keeping: absence of a literal is not absence of the thing.
 
 ## OTA container format
 
@@ -158,10 +162,12 @@ constant `0x018cba80` (26,000,000) in the tail config block.
 
 | Range | Size | Contents | Confidence |
 | --- | --- | --- | --- |
-| `abs 0x0` - `0x167ff` | ~90 KB | bootloader/loader, reset vectors, and the descrambler. **Not in any stock file.** | derived |
-| `abs 0x16800` | - | OTA write base; body `0` lands here | verified |
+| `abs 0x0` - `0x167ff` | ~90 KB | **BLE stack.** *Previously recorded here as the bootloader, which was wrong.* Published as `stack_1.0.0.hex` in Panchip's SDK | verified |
+| `abs 0x16800` | - | application load base; body `0` lands here | verified |
 | `abs 0x16808` - `0x26a24` | 66 KB | application image | verified |
-| `abs 0x26a24` - `0x3bfff` | ~87 KB | free or unknown. Large enough for a staging bank, but no literal points at a staging base. | speculation |
+| `abs 0x29400` - `0x3bfff` | 76.8 KB | **OTA staging bank.** *Previously "free or unknown, no literal points at a staging base", which was wrong: the base is a runtime value from a const table at `abs 0x26930`* | verified |
+| `abs 0x3d800` / `0x3da00` | 512 B each | section info page and backup; the OTA handoff record goes to the backup | verified |
+| `abs 0x3dc00` | 8 KB | **bootloader.** Never written by an app OTA | derived |
 | `abs 0x3c000` - `0x3c5ff` | 1.5 KB | **uploaded user content**, a `0x600`-byte buffer; literals at `0x3c000` (x8), `0x3c200`, `0x3c600` | derived |
 | `abs 0x3c800` | 8 B | upload metadata record | derived |
 | `abs 0x3f000` | 4 KB | data sector, referenced 7 times; purpose unknown (MAC or settings?) | derived |
@@ -261,28 +267,30 @@ variant. Do not trust its checks.
 
 ## Flashing risk and recovery
 
-### Why a bad flash might be permanent
+### Why a bad flash might be permanent: superseded
 
-A Cortex-M0 executing in place from `abs 0x16800` cannot erase itself, so the
-application must either stage the image elsewhere and let code below `0x16800`
-commit it on reboot (recoverable), or copy a flash writer into SRAM and overwrite
-itself (a power loss or bad image leaves a dead application). **Which of these
-happens is unknown**, and it is the single biggest open risk. That the CRC is
-verified only after the whole transfer weakly favours the staging design.
+**Kept to record the error. Read `research/firmware-flashing.md`.**
 
-Three further concerns:
+This section framed staging-versus-in-place as "the single biggest open risk" and
+unknowable without a dump. It is answerable from the image we already had, and the
+answer is **staged**: writes go to `abs 0x29400`, never to `0x16800`, so the running
+application is never at risk during a transfer.
 
-- The OTA service lives in the **application** GATT table (body `0xc32c` and
-  `0xc33c`), and the app finds `0xfff0` and `0xfd00` in one discovery pass. There is
-  no separate DFU-mode advertiser, so a dead application plausibly means no BLE.
-- Whether the bootloader validates the application at boot cannot be checked. The
-  CRC arrives in a control packet rather than embedded in the body, so we cannot
-  tell whether it is retained for a boot-time check.
-- The ~90 KB below `abs 0x16800` is in no stock file, so there is no vendor image
-  to restore it from.
+One claim here was not merely wrong but dangerous, and is corrected explicitly:
 
-Working in our favour: OTA writes start at `abs 0x16800` and go *upward*, away from
-the bootloader, so even an oversized image cannot reach it by overrunning.
+> "OTA writes start at `abs 0x16800` and go *upward*, away from the bootloader, so
+> even an oversized image cannot reach it by overrunning."
+
+Writes start at `abs 0x29400`, and the bootloader sits *above* them at `abs 0x3dc00`.
+The firmware accepts any `codeSize` below `0x19000` (102,400), while only 83,968
+bytes separate the staging base from the bootloader. **An oversized image erases the
+bootloader**, and that is the one brick reachable over the air. Keep images at or
+below the stock 66,084 bytes.
+
+Still true from this section: the OTA service lives in the **application** GATT table
+(body `0xc32c` and `0xc33c`) with no separate DFU advertiser, so an app image that
+fails to bring up BLE leaves no way back over the air. That, rather than the transfer,
+is the real risk.
 
 ### Hardware recovery via SWD
 

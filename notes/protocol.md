@@ -225,15 +225,15 @@ Practical consequences:
 
 The panel itself is a fast multiplexed matrix; it is not the limitation.
 
-**Flush before disconnecting.** Writes are fire-and-forget, so whatever is still
-queued when the connection drops is silently discarded. In a full-frame update the
-casualty is the last column written, which presents as the rightmost column of the
-panel being dead - a convincing hardware fault that is entirely our own doing.
-Column 23 is reachable; `AnimData`'s 295 frames are all 24 columns wide.
+**A dead-looking rightmost column means dropped writes, not dead hardware.**
+Unacked writes still queued when the connection drops are discarded, and the
+casualty is the last column of the frame. Column 23 is fine; `AnimData`'s 295
+frames are all 24 columns wide.
 
-`Glasses.end()` flushes by issuing one write WITH response: the acknowledgement
-guarantees every earlier write has been transmitted. *verified* - the right column
-was missing before the fix and present after.
+Handled in code: `Glasses.show()` sends its final write WITH response, so a frame
+cannot be half-delivered. `command_raw()` is deliberately unacked - callers
+driving whole frames through it must `flush()` themselves. *verified* by the right
+column being absent before the fix and present after.
 
 **No mirroring.** Confirmed with an asymmetric glyph: column 0 really is the
 left edge, and text renders the right way round with no flip needed.

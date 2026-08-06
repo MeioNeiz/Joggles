@@ -112,7 +112,12 @@ export class Glasses {
     await sleep(120)
   }
 
-  /** Write one bulk frame directly, bypassing the Grid's 24-column limit. */
+  /**
+   * Write one bulk frame directly, bypassing the Grid's 24-column limit.
+   *
+   * Unacked, so callers driving a whole frame this way must call flush() before
+   * disconnecting or the last writes are discarded.
+   */
   async command_raw(frame: Uint8Array): Promise<void> {
     await this.bulkChar.writeAsync(Buffer.from(p.encrypt(frame)), true)
     await sleep(this.pacing)
@@ -130,9 +135,13 @@ export class Glasses {
     const frames = full
       ? grid.toFrames().map((f, i) => [i, f] as [number, Uint8Array])
       : grid.deltaFrames(this.last)
-    for (const [, frame] of frames) {
-      await this.bulkChar.writeAsync(Buffer.from(p.encrypt(frame)), true)
-      await sleep(this.pacing)
+    for (const [i, [, frame]] of frames.entries()) {
+      // noble: second arg is `withoutResponse`. The last write of a frame is
+      // acked, so the frame cannot be half-delivered if the caller disconnects
+      // or exits immediately afterwards.
+      const last = i === frames.length - 1
+      await this.bulkChar.writeAsync(Buffer.from(p.encrypt(frame)), !last)
+      if (!last) await sleep(this.pacing)
     }
     this.last = grid.clone()
     return frames.length
@@ -146,11 +155,6 @@ export class Glasses {
    * "keep" is the default.
    */
   async end(mode: 'keep' | 'off' | 'restore' = 'keep'): Promise<void> {
-    // Writes are fire-and-forget, so anything still queued is discarded when the
-    // connection drops. The last column of a full frame is the usual casualty:
-    // it looks like the rightmost column of the panel is dead. Let the stack
-    // drain before tearing down.
-    await this.flush()
     if (mode === 'off') {
       await this.show(new Grid(), true)
       await this.command(p.leds(false))
@@ -162,18 +166,14 @@ export class Glasses {
   }
 
   /**
-   * Wait for queued write-without-response packets to actually go out.
+   * Force any queued writes out.
    *
    * A write WITH response is acknowledged by the peer, so once it returns every
-   * earlier write has necessarily been transmitted. Cheaper and more reliable
-   * than guessing at a sleep.
+   * earlier write has necessarily been transmitted. show() already ends with an
+   * acked write; this covers raw writers that do not.
    */
   async flush(): Promise<void> {
-    try {
-      await this.cmdChar.writeAsync(Buffer.from(p.encrypt(p.frame('STYPE'))), false)
-    } catch {
-      await sleep(200) // fall back to a delay if the acked write is refused
-    }
+    await this.cmdChar.writeAsync(Buffer.from(p.encrypt(p.frame('STYPE'))), false)
   }
 }
 
