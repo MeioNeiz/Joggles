@@ -1,0 +1,16 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Pulled/derived vendor artefacts - large, and not ours to redistribute
+apk/
+decompiled/
+
+# HCI snoop logs and other captures: can contain other devices' traffic
+captures/
+*.log
+*.pcap
+*.pcapng
+
+.DS_Store
