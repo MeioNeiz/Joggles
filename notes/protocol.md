@@ -208,11 +208,22 @@ to whatever was stored from the vendor app, so our frame vanishes and the old
 message reappears looking like stray pixels. Stay in DIY (`end(mode="keep")`)
 to keep a drawn frame up; use `LEDOFF` for a genuinely dark panel.
 
-**No double buffering.** Columns land one at a time, so a full-panel update
-visibly sweeps left to right rather than changing at once. Harmless for static
-content and for the device's own scrolling, but streamed full-frame animation
-will tear. Two ways around it: send only changed columns
-(`Grid.deltaFrames()`), or upload via DATS and let the firmware animate.
+**No double buffering, and it cannot be fixed by going faster.** Columns land
+one at a time, so a streamed full-panel update visibly sweeps left to right.
+
+The wipe is transmission-bound, confirmed by measuring time-to-fill against
+pacing: 468ms at 18ms, 165ms at 6ms, 58ms at 2ms - exactly 24 x pacing. But it
+stays *visible* even at the fast end, because a high-contrast full-panel change
+at ~2.4ms per column still reads as motion.
+
+Practical consequences:
+- Do not stream full frames for anything that should appear at once
+- Send only changed columns (`Grid.deltaFrames()`); a sparse update sweeps
+  proportionally less because it touches fewer columns
+- For animation that must look clean, upload via DATS and let the firmware
+  render from local memory - no transmission artefact, and no connection
+
+The panel itself is a fast multiplexed matrix; it is not the limitation.
 
 **No mirroring.** Confirmed with an asymmetric glyph: column 0 really is the
 left edge, and text renders the right way round with no flip needed.
