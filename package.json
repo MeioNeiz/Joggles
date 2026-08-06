@@ -1,0 +1,11 @@
+{
+  "name": "joggles",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*"],
+  "trustedDependencies": ["@abandonware/noble", "@abandonware/bluetooth-hci-socket"],
+  "scripts": {
+    "test": "bun test packages/core",
+    "cli": "bun run packages/cli/src/index.ts"
+  }
+}

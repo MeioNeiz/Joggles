@@ -1,0 +1,9 @@
+{
+  "name": "@joggles/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": {
+    "@joggles/core": "workspace:*",
+    "@abandonware/noble": "^1.9.2-26"
+  }
+}
