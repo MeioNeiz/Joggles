@@ -149,6 +149,27 @@ capture sets 14 consecutive bits, consistent with a 14-row panel.
 Verified: `column(0, 030000)` encrypts to `dde2655d6e7a9923a30db0f1f9e97ce4`,
 identical to the capture.
 
+## Hardware quirks that cost real time
+
+**One 16-byte block per ATT write. Never batch.** MTU is 185, so 11 blocks fit
+in a single write, but the panel decodes only the FIRST block and silently
+discards the remainder. Batching 11 blocks per write updated columns 0, 11 and
+22 and lost the other 21, which looks like corruption rather than an error.
+Throughput comes from pacing, not from larger writes.
+
+**Write-without-response has no flow control.** 24 back-to-back column writes
+overrun the controller and some are dropped, leaving those columns showing the
+previous frame - stuck LEDs during animation. Roughly 20 ms between writes is
+enough. `client.Glasses.show()` handles both of these.
+
+**Leaving DIY mode restores the saved image.** `SMVEW 00` hands the display back
+to whatever was stored from the vendor app, so our frame vanishes and the old
+message reappears looking like stray pixels. Stay in DIY (`end(mode="keep")`)
+to keep a drawn frame up; use `LEDOFF` for a genuinely dark panel.
+
+**No mirroring.** Confirmed with an asymmetric glyph: column 0 really is the
+left edge, and text renders the right way round with no flip needed.
+
 ## Open questions
 
 - [ ] Our unit's actual panel size (send `STYPE`, read notify)
