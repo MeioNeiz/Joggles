@@ -12,6 +12,8 @@ pixel format and panel geometry.
     packages/core    protocol, display, font    pure TS, zero dependencies
     packages/cli     laptop control via noble   Bun + CoreBluetooth
     tools/           APK pull and decompile     shell
+    notes/           protocol reference         solved, verified on hardware
+    research/        firmware and OTA teardown  plus a runnable image codec
 
 ## Quick start
 
@@ -39,9 +41,17 @@ fails to load at runtime.
 | Property | Value |
 | --- | --- |
 | Advertised name | `GLASSES-{MAC}` |
-| SoC | Panchip (OTA service `fd00`) |
+| SoC | ARM Cortex-M, 16 KB SRAM, 26 MHz crystal |
+| Firmware | `TR1906R04-10`, roughly 66 KB, loaded above a resident bootloader |
+| OTA | service `fd00`, Panchip-style profile (no vendor name in the binaries) |
 | Panel | 9 rows x 24 columns per lens, two bits per pixel |
-| Encryption | AES-128-ECB, one 16-byte block per write |
+| Encryption | AES-128-ECB, one 16-byte block per write; OTA is **not** encrypted |
+
+The OTA image format is solved and both stock images round-trip byte-identically:
+
+    bun research/ota-codec.ts verify firmware/*.bin
+
+Flashing is nonetheless **not** safe yet. See `research/firmware-image-format.md`.
 
 Two physical gaps in the panel: the middle of the top row, and a triangular
 nose-bridge notch. `display.alive()` maps them.

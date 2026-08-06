@@ -1,7 +1,7 @@
 # Joggles
 
-App-controlled LED glasses (vendor app: Funky Glasses+). Protocol solved, verified on
-hardware. Key, command table, frame format: `notes/protocol.md`.
+LED glasses, vendor app Funky Glasses+. Protocol solved, verified on hardware. Detail:
+`notes/protocol.md`, `research/` (firmware, OTA, saved content).
 
 - Bun + TS only. No Python, no Go
 - `packages/core` pure TS, zero deps. `packages/cli` noble/CoreBluetooth
@@ -9,36 +9,36 @@ hardware. Key, command table, frame format: `notes/protocol.md`.
 
 ## Mental model
 
-Glasses render on-device, not a dumb frame buffer: scroll (`MODE 03/04`), built-in
-`ANIM`/`IMAG` banks, persistent saved content. BLE is the upload channel. Prefer
-upload-once + device-side animation over streaming frames.
+Renders on-device. Upload once, let it animate; don't stream. Saved store is separate
+from the DIY live buffer; `MODE` shows the saved store. Wide buffers work (~200 cols,
+scrolls unattended).
+
+Channels: `9600` cmds | `9601` notify | `960a` DATS bulk | `960b` live per-column.
+Save: `DATS <type> <len16>` -> `DATSOK` -> 15-byte blocks -> `DATCP` -> `DATCPOK`.
+type 1 text (2-byte cols), 2 image (3-byte cols). One buffer per type, no slots.
+`SMVEW 02` also saves (app never sends it).
 
 ## Gotchas
 
-- ONE 16-byte block per ATT write. Panel decodes first block only, silently drops the
-  rest. Never batch
+- ONE 16-byte block per ATT write. Panel decodes first only, drops rest silently
 - Write-without-response has no flow control. Pace writes or columns go stale
-- Pacing-bound not hardware-bound (bench: 18ms 2.2fps, 1ms 33.7fps). 18ms was a bad
-  guess. Safe floor not yet confirmed visually
-- Exiting DIY (`SMVEW 00`) restores the vendor-saved image. Looks like stray pixels.
-  Default `end('keep')`
-- BLE = one connection. Close phone app before connecting from laptop
-- macOS: terminal app needs Bluetooth permission or SIGABRT, no message
-- `@abandonware/noble` needs `trustedDependencies` or binding fails at runtime
+- Pacing-bound not hardware-bound. Safe floor unknown
+- `SMVEW 00` restores the saved image, looks like stray pixels. Default `end('keep')`
+- `MODE` while in DIY switches to saved content, discards the live buffer
+- BLE = one connection. Close phone app first
 
 ## Geometry
 
-9 rows x 24 cols per lens. row 0 = bottom, col 0 = left. row r -> bit 2r (2 bits per
-pixel, odd bit unknown). Dead: middle 6 of top row, triangular nose notch bottom.
-`display.alive()`.
+9 rows x 24 cols/lens. row 0 bottom, col 0 left. row r -> bit 2r, 2bpp. Dead: top-row
+mid-6, nose notch. `display.alive()`.
 
 ## Unverified
 
-Device-side scroll from a wide uploaded buffer, `LEDFIRST`/`LEDSECOND` lens select,
-odd-bit meaning, `STYPE` never answers on our unit.
+`MODE` 2nd byte (direction in app, n=0..7 differ on hw), `DATS` type 2 >72 bytes,
+`LEDFIRST`/`LEDSECOND`, odd bit, `COLR`/`LEVL`/`POWR`, `STYPE`.
 
 ## Don't
 
-- Flash firmware. OTA images encrypted with a bootloader-held key we don't have. Stock
-  images in `firmware/` are recovery only
-- Commit vendor binaries: `apk/`, `decompiled/`, `native/`, `firmware/` (gitignored)
+- Flash firmware. Format solved (XOR pad + CRC32, no signature) but no verified
+  recovery path, and OTA lives in the app image: bad flash may be permanent
+- Commit vendor binaries: `apk/`, `decompiled/`, `native/`, `firmware/`

@@ -83,8 +83,8 @@ fastjson2 constant names; resolved values are `D`=68, `G`=71, `H`=72, `M`=77,
 | `IMAG n` | `05 IMAG n` | built-in image |
 | `MODE 01` | `05 MODE 01` | static |
 | `MODE 02 hi lo` | `07 MODE ...` | flashing, 16-bit rate |
-| `MODE 03 n` | `06 MODE 03 n` | scroll left |
-| `MODE 04 n` | `06 MODE 04 n` | scroll right |
+| `MODE 03 n` | `06 MODE 03 n` | **mislabelled**, see "Two display paths" below |
+| `MODE 04 n` | `06 MODE 04 n` | **mislabelled**, dead code in the app |
 | `MODE 07` | `05 MODE 07` | "RP" mode |
 | `MODE 08 n` / `MODE 09 n` | `06` | connect-roll right / left |
 | `STOPR` | `05 STOPR` | stop rhythm mode |
@@ -93,6 +93,18 @@ fastjson2 constant names; resolved values are `D`=68, `G`=71, `H`=72, `M`=77,
 | `SCHD on h m` | `07 SCHD ...` | scheduled on/off timer |
 | `STSC` | `04 STSC` | read timer setting |
 | `CALL st t` | `06 CALL ...` | incoming-call display |
+| `DATS t hi lo` | `07 DATS ...` | announce a bulk upload, type + 16-bit length |
+| `DATCP` | `05 DATCP` | bulk upload complete, device verifies and stores |
+| `COLR` | `08 COLR ...` | colour, never emitted by the app |
+| `LEVL` | `06 LEVL ...` | level, never emitted by the app |
+| `POWR` | `05 POWR ...` | power, never emitted by the app |
+
+Device replies on the notify characteristic: `DATSOK`, `DATCPOK`, `ERROR`. These
+three are the only notifications the app parses, and all belong to `DATS`.
+
+Which of these the app actually emits, and which are library dead code, is listed
+in `research/vendor-app-protocol.md`. Dead in the app does not mean unsupported by
+the firmware: `SMVEW 02` is dead in the app and works on our unit.
 
 ## Panel geometry - confirmed on hardware
 
@@ -187,42 +199,182 @@ The device is **not** a dumb frame buffer. There are two separate things:
 Sending any `MODE` command while in DIY switches away from the live buffer to
 the stored content. Every early test did this and threw the drawing away.
 
-**`MODE`'s second byte is not speed.** Speed has its own opcode (`SPEED n`), so
-`getRollToLeftCommand(i) -> MODE 3 i` is far more likely a content-slot index.
-Cycling `MODE 01 <n>` for n=0..7 produced different displays, but the mapping
-was not resolved by eye. Treat the earlier "scroll left at speed n" labelling in
-the command table as **wrong**.
+**`MODE`'s second byte is not speed.** Speed has its own opcode (`SPEED n`). Treat
+the earlier "scroll left at speed n" labelling in the command table as **wrong**.
+
+It is not a slot index either, at least not as the app uses it. The app emits
+`getContentCommand(mode, dir)` -> `06 MODE <mode> <dir>` with `mode` 1 static, 2
+horizontal scroll, 3 vertical scroll, and `dir` only ever 0 or 1. The
+`getRollToLeft/RightCommand` variants that suggested a count are dead code, as is
+`SPEED`'s neighbour set. So in the app the second byte is a **direction flag**.
+
+That leaves a genuine tension: cycling `MODE 01 <n>` for n=0..7 produced different
+displays on our unit. Both can hold if the firmware reads the byte more liberally
+than the app ever writes it. Unresolved, and worth a careful sweep.
 
 The device animates stored content by itself, with nothing connected: `MODE 03`
 produced text bouncing left-to-right unattended. So upload-once-then-disconnect
 is viable in principle, once we know how to get our content into the slot the
 `MODE` commands read.
 
+**How to get content into that slot: the `DATS`/`DATCP` handshake.** This is the
+app's real persist-to-device path and it was missing from this document entirely:
+
+    DATS <type> <len16>   on ...9600      07 44 41 54 53 tt hh ll
+    -> DATSOK             on ...9601
+    stream len bytes      on ...960a      [count][up to 15 data bytes] per block
+    DATCP                 on ...9600      05 44 41 54 43 50
+    -> DATCPOK            on ...9601      or ERROR
+
+`type` is 1 for text and 2 for a DIY image; those are the only values the app
+uses. Length is 16-bit, so up to 65535 bytes may be announced. All three reply
+strings sit in the firmware image at body offset `0x1dbc`, which confirms the
+handshake is firmware-side. There is no slot argument: one buffer per type.
+
+Note that `SMVEW 02` is **dead code in the app** (zero callers), yet our hardware
+test shows the device honours it. Dead in the app does not mean absent from the
+firmware, so the dead-code list below is a menu to try, not a list to discount.
+
 ### Buffer width
 
 Writing column indices 0..49 corrupted the display rather than extending it, so
-the DIY buffer is very likely 24 columns, matching the panel. Not conclusive.
+the **DIY live buffer** is very likely 24 columns, matching the panel.
 
-### Next step: capture the vendor app
+The **saved store is wider, and this is now proven.** The app's text path
+concatenates 2-byte glyph columns into one flat buffer with no truncation, ships
+it in a single `DATS 01 <len>`, and only then sends one `MODE` command. Its
+40-character input cap works out at roughly 200 columns, about 8 times the panel,
+in around 400 bytes. So wide device-side scrolling is real; the earlier failure
+was writing wide into the live buffer instead of uploading to the saved store.
 
-The remaining semantics (which slot, how the app loads a long message, what the
-`MODE` second byte selects) are demonstrated by the vendor app every time it is
-used. With the AES key we can decrypt its traffic in full.
+Untested and the obvious next experiment: `DATS` type 2 with a length greater than
+72 bytes, then drive it with `MODE`, watching `...9601` for `DATCPOK` versus
+`ERROR`. That also gives us a working request/response probe, which matters
+because our unit never answers `STYPE`.
+
+### Cross-checking against a live capture
+
+The semantics above were recovered by reading the app's own code, which is the
+authority on what it emits. An HCI capture is still the way to confirm ordering
+and timing on the wire:
 
     adb shell settings put global bluetooth_hci_log 1
     # drive the app: type a message, save it, set it scrolling
     adb bugreport bug.zip     # btsnoop_hci.log is inside; no root needed
 
-Decrypt each 16-byte write with the key and the sequence is self-explanatory.
-This is far more reliable than inferring behaviour by eye.
+Decrypt each 16-byte write with the key and the sequence is self-explanatory. Note
+the OTA channels are the one exception: those writes are **not** encrypted.
+
+## Channel routing
+
+Settled from the app's characteristic map.
+
+| Characteristic | Role |
+| --- | --- |
+| `...9600` | commands, including `DATS` and `DATCP` |
+| `...9601` | notify, device replies |
+| `...960a` | `DATS` bulk stream, count-prefixed blocks |
+| `...960b` | live/real-time: per-column DIY writes and rhythm frames |
+
+So the `[04][column][3 bytes]` format documented above is the **live** format on
+`...960b`. The `DATS` stream on `...960a` is a different encoding: a flat
+concatenation of columns, 2 bytes per column for text and 3 for a DIY image.
+
+
+## DATS/DATCP: storing content wider than the panel
+
+**This is the mechanism the vendor app uses for real messages**, and it is
+entirely separate from the DIY column path. Source of truth is
+`model/data/TextAgreement.java`, confirmed against a full HCI capture.
+
+### Handshake
+
+    app -> cmd char (9600)   [07]["DATS"][01][len_hi][len_lo]
+    dev -> notify (9601)     "DATSOK"
+    app -> data char (960a)  [len][up to 15 payload bytes]   xN, ~50ms apart
+    app -> cmd char          [05]["DATCP"]
+    dev -> notify            "DATCPOK"  or  "ERROR"
+
+Length is 16-bit big-endian (`Agreement.int2Bytes` = `[i/256, i%256]`).
+
+**Data chunks are framed, not raw.** Each 16-byte block is `[length][15 bytes of
+payload]`. Reassembly must strip that prefix; concatenating the full 16 bytes
+shifts the whole bitmap and produces convincing-looking garbage.
+
+Note the characteristic split: commands go to `9600` (`writeCharacteristic`),
+bulk data to **`960a`** (`writeCharacteristicBy2`). Our DIY code uses `960b`,
+which the reference capture used. Both bulk characteristics exist.
+
+### Payload format
+
+16-bit little-endian per display column, 14 rows:
+
+    bits 0-6   rows 0-6
+    bit  7     unused
+    bits 8-14  rows 7-13
+    bit  15    unused
+
+This is a **different pixel encoding from the DIY path**, which uses 3 bytes per
+column at bit stride 2. Do not mix them up.
+
+Verified end to end: a captured 178-byte upload reassembles into 89 columns that
+render as "ZZZ HELLO WORLD ZZZ" in the low 7 bits, the high field empty.
+
+### Why this matters
+
+The `MODE` commands display DATS-uploaded content, not the DIY buffer. That is
+why every attempt to make `MODE 03` scroll our DIY drawing failed. To get our
+own content animating standalone we must upload it via DATS, not by drawing
+columns.
+
+## Research gap: model/data/ was under-searched
+
+`Agreement.java` was found by grepping for AES usage and read in isolation. Its
+own directory was never listed, and it contains most of the protocol:
+
+| File | Contents |
+| --- | --- |
+| `TextAgreement.java` | the DATS/DATCP upload protocol above |
+| `DiyAgreement.java` | the DIY column protocol |
+| `Text1456.java` | the vendor's font, `getStringBytes()` |
+| `AnimData.java` | built-in animation bitmaps, 65 KB |
+| `ImageData.java` | built-in image bitmaps |
+
+The HCI capture only rediscovered what was already in the decompiled source.
+When something looks undocumented, list the directory before inferring from
+traffic.
 
 ## Open questions
 
-- [ ] Our unit's actual panel size (send `STYPE`, read notify)
-- [ ] Bit order within the 3-byte column: MSB-first assumed, unverified
-- [ ] Which bulk characteristic is live, `...960a` or `...960b`
-- [ ] Whether DIY mode must be entered before bulk writes are accepted
-- [ ] Text: does the device hold a font, or does the app rasterise and upload?
+Answered since the last pass:
 
-All of these need the hardware, and are blocked on macOS Bluetooth permission
-for the terminal.
+- [x] **Which bulk characteristic is live.** Both, for different jobs: see the
+      routing table above.
+- [x] **Whether DIY mode must be entered before bulk writes are accepted.** Not for
+      `DATS` uploads: the text path never enters DIY. DIY is for the live channel.
+- [x] **Text: device font or app rasterisation?** The app rasterises, at 12x12 from
+      bundled TTFs plus a hardcoded glyph table, and uploads columns. The firmware
+      does carry a small 5-row glyph strip and a "Cool" bitmap for its own built-in
+      content, so both exist but serve different purposes. Our own rasteriser is
+      free to do better for a 6-row band.
+- [x] **Our unit's panel size via `STYPE`.** No route through the app: it never
+      sends `STYPE`, and its `parseType` only knows 5x36, 12x48, 14x56 and 16x64,
+      none of which match 9x24. Empirical mapping stays the only option.
+
+Still open:
+
+- [ ] Bit order within the 3-byte column: MSB-first assumed, unverified
+- [ ] `MODE` second byte: direction in the app, but n=0..7 differ on hardware
+- [ ] `DATS` type 2 with a payload wider than 72 bytes
+- [ ] `LEDFIRST`/`LEDSECOND` lens select, and the odd bit's meaning
+- [ ] `COLR`, `LEVL`, `POWR`: real opcodes in the app's tables, never emitted
+
+## Further reading
+
+- `research/vendor-app-protocol.md` - the `DATS`/`DATCP` subsystem in full, the
+  complete live-versus-dead opcode inventory, `IMAG`/`ANIM` bank ranges, and every
+  hard limit with its source.
+- `research/firmware-image-format.md` - the OTA container (solved: XOR pad plus a
+  CRC-32 over the deobfuscated body, no signature), what is inside the firmware,
+  and why flashing is still not safe.
+- `research/ota-codec.ts` - decode, encode and verify OTA images.
