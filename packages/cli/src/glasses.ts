@@ -55,6 +55,12 @@ export class Glasses {
     await sleep(120)
   }
 
+  /** Write one bulk frame directly, bypassing the Grid's 24-column limit. */
+  async command_raw(frame: Uint8Array): Promise<void> {
+    await this.bulkChar.writeAsync(Buffer.from(p.encrypt(frame)), true)
+    await sleep(this.pacing)
+  }
+
   /** Enter DIY mode with the panel on, ready for pixel writes. */
   async begin(): Promise<void> {
     await this.command(p.enterDIY())

@@ -170,6 +170,52 @@ to keep a drawn frame up; use `LEDOFF` for a genuinely dark panel.
 **No mirroring.** Confirmed with an asymmetric glyph: column 0 really is the
 left edge, and text renders the right way round with no flip needed.
 
+
+## Two display paths: DIY buffer vs saved content
+
+Established on hardware, and it corrects an earlier misreading of the command
+table.
+
+The device is **not** a dumb frame buffer. There are two separate things:
+
+1. **DIY live buffer** - what `SMVEW 01` puts us into. Bulk column writes land
+   here and show immediately. `SMVEW 02` saves it, and the content survives:
+   drawing "JOM", saving, and disconnecting leaves "JOM" on screen.
+2. **Stored content, displayed by the `MODE` family** - a different slot. On our
+   unit it holds "WOWo", saved earlier from the vendor app.
+
+Sending any `MODE` command while in DIY switches away from the live buffer to
+the stored content. Every early test did this and threw the drawing away.
+
+**`MODE`'s second byte is not speed.** Speed has its own opcode (`SPEED n`), so
+`getRollToLeftCommand(i) -> MODE 3 i` is far more likely a content-slot index.
+Cycling `MODE 01 <n>` for n=0..7 produced different displays, but the mapping
+was not resolved by eye. Treat the earlier "scroll left at speed n" labelling in
+the command table as **wrong**.
+
+The device animates stored content by itself, with nothing connected: `MODE 03`
+produced text bouncing left-to-right unattended. So upload-once-then-disconnect
+is viable in principle, once we know how to get our content into the slot the
+`MODE` commands read.
+
+### Buffer width
+
+Writing column indices 0..49 corrupted the display rather than extending it, so
+the DIY buffer is very likely 24 columns, matching the panel. Not conclusive.
+
+### Next step: capture the vendor app
+
+The remaining semantics (which slot, how the app loads a long message, what the
+`MODE` second byte selects) are demonstrated by the vendor app every time it is
+used. With the AES key we can decrypt its traffic in full.
+
+    adb shell settings put global bluetooth_hci_log 1
+    # drive the app: type a message, save it, set it scrolling
+    adb bugreport bug.zip     # btsnoop_hci.log is inside; no root needed
+
+Decrypt each 16-byte write with the key and the sequence is self-explanatory.
+This is far more reliable than inferring behaviour by eye.
+
 ## Open questions
 
 - [ ] Our unit's actual panel size (send `STYPE`, read notify)
