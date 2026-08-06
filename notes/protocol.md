@@ -208,6 +208,12 @@ to whatever was stored from the vendor app, so our frame vanishes and the old
 message reappears looking like stray pixels. Stay in DIY (`end(mode="keep")`)
 to keep a drawn frame up; use `LEDOFF` for a genuinely dark panel.
 
+**No double buffering.** Columns land one at a time, so a full-panel update
+visibly sweeps left to right rather than changing at once. Harmless for static
+content and for the device's own scrolling, but streamed full-frame animation
+will tear. Two ways around it: send only changed columns
+(`Grid.deltaFrames()`), or upload via DATS and let the firmware animate.
+
 **No mirroring.** Confirmed with an asymmetric glyph: column 0 really is the
 left edge, and text renders the right way round with no flip needed.
 
